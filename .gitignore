@@ -1,0 +1,15 @@
+# ---- 密钥与本地配置（绝不能进仓库） ----
+# 本仓库不含任何 API Key；以下兜底规则防止误提交本地配置/密钥文件。
+*.local.*
+*.local.yml
+*.local.yaml
+.env
+.env.*
+credentials.yaml
+.credentials.yaml
+**/cordis.patch.yml
+
+# ---- 系统与编辑器杂项 ----
+.DS_Store
+node_modules/
+*.log
