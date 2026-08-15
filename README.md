@@ -28,8 +28,10 @@ fail, per-provider error details are returned.
   polish (`polishMode: llm`) produces a fully rewritten, structured request.
 - ✍️ The text is filled into the composer draft (your pre-existing draft is
   preserved), so you can review before sending.
-- 🔀 Multiple providers with priority failover; any OpenAI-compatible
-  `input_audio` ASR endpoint can be added **without code** (see below).
+- 🔀 Multiple providers with priority failover; plug in your own models via
+  three adapter types: `openai-whisper` (OpenAI / Groq / SiliconFlow …),
+  `openai-compatible` (`input_audio` chat/completions), and the two built-ins
+  (Alibaba Bailian / Xiaomi MiMo). Ready-made config templates included.
 - 🔑 API keys live only in the DSH server process (plugin config or
   environment / DSH credentials seam), never in the browser.
 - 🌐 Chinese / English UI strings, themed with harness CSS variables.
@@ -138,6 +140,48 @@ the raw transcript if the call fails.
 ```
 
 (Xiaomi MiMo is just a pre-configured `openai-compatible` instance.)
+
+### Ready-made templates: common speech services (copy & paste)
+
+Not using Alibaba / Xiaomi? The plugin supports three adapter types — add any of
+these to the `providers` list (lower `priority` wins; `enabled: false` disables):
+
+**A. `openai-whisper` type — OpenAI Whisper-style (multipart file upload)**
+
+```yaml
+- id: openai-whisper        # OpenAI official Whisper
+  type: openai-whisper
+  enabled: true
+  priority: 5
+  apiKeyEnv: OPENAI_API_KEY
+  baseUrl: https://api.openai.com/v1/audio/transcriptions
+  model: whisper-1
+- id: groq-whisper          # Groq (generous free tier, fast)
+  type: openai-whisper
+  enabled: true
+  priority: 10
+  apiKeyEnv: GROQ_API_KEY
+  baseUrl: https://api.groq.com/openai/v1/audio/transcriptions
+  model: whisper-large-v3
+- id: siliconflow-sensevoice  # SiliconFlow SenseVoice (strong Chinese)
+  type: openai-whisper
+  enabled: true
+  priority: 15
+  apiKeyEnv: SILICONFLOW_API_KEY
+  baseUrl: https://api.siliconflow.cn/v1/audio/transcriptions
+  model: FunAudioLLM/SenseVoiceSmall
+```
+
+**B. `openai-compatible` type — chat/completions with `input_audio`**
+
+Any chat/completions ASR endpoint accepting an `input_audio` part (base64 data
+URL + format); see "Generic adapter" above.
+
+**C. `aliyun-bailian` / `xiaomi-mimo` types** — the two built-ins; you can point
+their `baseUrl`/`model` at same-shaped endpoints (e.g. the Alibaba workspace URL).
+
+> Tip: the defaults already include Alibaba + Xiaomi; to replace them, set their
+> `enabled: false` and add your own services.
 
 ### Adding a custom adapter
 

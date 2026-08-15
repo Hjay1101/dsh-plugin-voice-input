@@ -22,8 +22,9 @@ DeepSeek Harness 语音输入插件：在 Web 界面的聊天输入框加一个�
 - ✨ **文案整理**：定稿自动整理（去语气词、口吃叠字、重复口头禅，补结尾标点），
   更便于大模型理解；可选接入 LLM 深度润色（`polishMode: llm`）。
 - ✍️ 识别文字填入输入框草稿（保留你录音前已写的内容），可修改后再发送。
-- 🔀 多 provider + 优先级故障转移，配置化支持任意 OpenAI 兼容的 `input_audio`
-  ASR 端点（零代码接入，见下文「通用适配器」）。
+- 🔀 多 provider + 优先级故障转移；支持自定义模型：三种适配器类型
+  （`openai-whisper`：OpenAI/Groq/SiliconFlow 等；`openai-compatible`：
+  `input_audio` chat/completions；内置阿里云/小米），现成配置模板复制即用。
 - 🔑 API Key 只在 DSH 服务器进程内使用（插件配置或环境变量 / DSH 凭据 seam），
   绝不下发浏览器。
 - 🌐 中 / 英文界面文案，跟随 harness 主题变量。
@@ -132,6 +133,48 @@ config:
 ```
 
 （小米 MiMo 就是 `openai-compatible` 的预置实例，只是默认值不同。）
+
+### 现成模板：常见语音服务（复制即用）
+
+不一定用阿里云 / 小米？插件支持三种适配器类型，下面这些服务改个 Key 就能加进
+`providers` 列表（`priority` 越小越优先；`enabled: false` 可停用）：
+
+**A. `openai-whisper` 类型 —— OpenAI Whisper 形态（multipart 文件上传）**
+
+```yaml
+- id: openai-whisper        # OpenAI 官方 Whisper
+  type: openai-whisper
+  enabled: true
+  priority: 5
+  apiKeyEnv: OPENAI_API_KEY
+  baseUrl: https://api.openai.com/v1/audio/transcriptions
+  model: whisper-1
+- id: groq-whisper          # Groq（免费额度大，速度快）
+  type: openai-whisper
+  enabled: true
+  priority: 10
+  apiKeyEnv: GROQ_API_KEY
+  baseUrl: https://api.groq.com/openai/v1/audio/transcriptions
+  model: whisper-large-v3
+- id: siliconflow-sensevoice  # SiliconFlow SenseVoice（中文识别强）
+  type: openai-whisper
+  enabled: true
+  priority: 15
+  apiKeyEnv: SILICONFLOW_API_KEY
+  baseUrl: https://api.siliconflow.cn/v1/audio/transcriptions
+  model: FunAudioLLM/SenseVoiceSmall
+```
+
+**B. `openai-compatible` 类型 —— chat/completions + `input_audio`**
+
+任意支持 `input_audio`（base64 data URL + format）的 chat/completions ASR 端点，
+见上文「通用适配器」。
+
+**C. `aliyun-bailian` / `xiaomi-mimo` 类型** —— 内置的两家，可直接改 baseUrl/model
+指向同形态端点（如阿里云业务空间域名）。
+
+> 提示：默认配置里已有阿里云 + 小米两项；想"换掉"默认就把它们的 `enabled` 设为
+> `false`，再加你自己的服务。
 
 ### 新增自有适配器
 

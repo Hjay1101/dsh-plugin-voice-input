@@ -358,11 +358,53 @@ function guessFormat(mime) {
   return "wav";
 }
 
+/**
+ * OpenAI Whisper 形态的 ASR 端点（multipart/form-data 文件上传）：
+ *   POST <baseUrl>  file=<audio> + model=<model> [+ language]
+ *   → 响应 { "text": "..." }
+ * 覆盖 OpenAI Whisper、Groq Whisper、SiliconFlow SenseVoice 等一众常见服务，
+ * 它们只是 baseUrl / model / Key 不同，复制配置模板即可接入。
+ */
+async function transcribeOpenAiWhisper(provider, request, apiKey, timeoutMs) {
+  const baseUrl =
+    provider.baseUrl || "https://api.openai.com/v1/audio/transcriptions";
+  const model = provider.model || "whisper-1";
+  const dataUrl = toDataUrl(request.audio, request.mime);
+  const b64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  const bytes = Buffer.from(b64, "base64");
+  if (bytes.length === 0) throw new TranscribeError("bad-audio", "audio payload is empty");
+
+  const format = (request.format || "").toLowerCase() || guessFormat(request.mime);
+  const mime = /^[a-z0-9]+\/[a-z0-9.+-]+$/i.test(request.mime || "") ? request.mime : format === "mp3" ? "audio/mpeg" : "audio/wav";
+  const form = new FormData();
+  form.append("file", new Blob([bytes], { type: mime }), `audio.${format}`);
+  form.append("model", model);
+  const language = request.language || provider.language;
+  if (language) form.append("language", language);
+
+  // 注意：FormData 自带 multipart boundary，绝不能手动设置 Content-Type。
+  const body = await fetchJson(
+    baseUrl,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        ...provider.extraHeaders,
+      },
+      body: form,
+    },
+    timeoutMs,
+  );
+
+  return body && typeof body.text === "string" ? body.text : "";
+}
+
 /** 适配器注册表：type -> 实现。未知类型回退到 openai-compatible。 */
 const ADAPTERS = {
   "aliyun-bailian": transcribeAliyunBailian,
   "xiaomi-mimo": transcribeOpenAiCompatible,
   "openai-compatible": transcribeOpenAiCompatible,
+  "openai-whisper": transcribeOpenAiWhisper,
 };
 
 // ---------- 文案整理 ----------
