@@ -26,12 +26,14 @@ DeepSeek Harness 语音输入插件：在 Web 界面的聊天输入框加一个�
 
 ## 安装
 
-插件以 `file:` 依赖方式装进你的 DSH profile（示例为 `web` profile）：
+推荐从 GitHub 安装（开源仓库：`github:Hjay1101/dsh-plugin-voice-input`）：
 
 ```bash
-# 1. 在 profile 目录加入依赖（路径换成你的插件目录）
+# 1. 在 profile 目录加入依赖（任意一种方式）
 cd ~/.dsh/profiles/web
-pnpm add file:/path/to/dsh-plugin-voice-input
+pnpm add github:Hjay1101/dsh-plugin-voice-input
+# 或本地开发：
+# pnpm add file:/path/to/dsh-plugin-voice-input
 
 # 2. 在 cordis.patch.yml 追加插件条目（见下）
 # 3. 重启 dsh web 服务，刷新页面

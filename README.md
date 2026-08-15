@@ -30,11 +30,13 @@ fail, per-provider error details are returned.
 
 ## Install
 
-Add the plugin as a `file:` dependency of your DSH profile (example: `web`):
+Recommended: install from the GitHub repo (`github:Hjay1101/dsh-plugin-voice-input`):
 
 ```bash
 cd ~/.dsh/profiles/web
-pnpm add file:/path/to/dsh-plugin-voice-input
+pnpm add github:Hjay1101/dsh-plugin-voice-input
+# local development alternative:
+# pnpm add file:/path/to/dsh-plugin-voice-input
 ```
 
 Then append to `cordis.patch.yml` (keep your existing insert list):
