@@ -221,20 +221,16 @@ window.__ModuleLoader__.load({
         width: 32,
         height: 32,
         padding: 0,
-        border: "1px solid var(--dsw-alias-border-l2)",
-        background: "transparent",
-        color: "var(--dsw-alias-label-primary)",
-        borderRadius: 8,
         cursor: "pointer",
         flex: "none",
         font: "inherit",
         position: "relative",
       },
+      // 录音中：红色提示环（内联 border 覆盖类样式里的 border:none）。
       buttonRecording: {
-        borderColor: "var(--dsw-alias-state-error-primary)",
+        border: "1px solid var(--dsw-alias-state-error-primary)",
         color: "var(--dsw-alias-state-error-primary)",
       },
-      buttonDisabled: { opacity: 0.55, cursor: "default" },
       status: {
         display: "inline-flex",
         alignItems: "center",
@@ -266,7 +262,7 @@ window.__ModuleLoader__.load({
       },
     };
 
-    // 注入全局关键帧（幂等）。
+    // 注入全局关键帧 + 按钮样式（幂等）。
     if (typeof document !== "undefined") {
       const keyframesId = "dsh-plugin-voice-input-keyframes";
       if (!document.getElementById(keyframesId)) {
@@ -274,7 +270,13 @@ window.__ModuleLoader__.load({
         tag.id = keyframesId;
         tag.textContent =
           "@keyframes dsh-voice-pulse{0%,100%{opacity:1}50%{opacity:.25}}" +
-          "@keyframes dsh-voice-spin{to{transform:rotate(360deg)}}";
+          "@keyframes dsh-voice-spin{to{transform:rotate(360deg)}}" +
+          // 空闲态无边框，与输入框工具栏原生图标按钮融为一体；
+          // hover 给轻微底色反馈，录音态由内联样式加红色提示环。
+          ".dsh-voice-mic-btn{box-sizing:border-box;color:var(--dsw-alias-label-primary);background:transparent;border:none;border-radius:8px}" +
+          ".dsh-voice-mic-btn:hover{background:var(--dsw-alias-bg-layer-2)}" +
+          ".dsh-voice-mic-btn:focus-visible{outline:2px solid var(--dsw-alias-label-tertiary);outline-offset:-2px}" +
+          ".dsh-voice-mic-btn:disabled{opacity:.55;cursor:default}";
         document.head.appendChild(tag);
       }
     }
@@ -558,7 +560,6 @@ window.__ModuleLoader__.load({
       const buttonStyle = {
         ...styles.button,
         ...(recording ? styles.buttonRecording : null),
-        ...(busy ? styles.buttonDisabled : null),
       };
 
       const statusEl =
@@ -591,6 +592,7 @@ window.__ModuleLoader__.load({
           "button",
           {
             type: "button",
+            className: "dsh-voice-mic-btn",
             style: buttonStyle,
             title: recording ? t("stopHint") : t("startHint"),
             "aria-label": recording ? t("stopHint") : t("startHint"),
