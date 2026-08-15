@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-voice-input",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "DeepSeek Harness voice input plugin: record audio in the Web GUI, transcribe it through pluggable STT providers (Alibaba Bailian, Xiaomi MiMo, or any OpenAI-compatible endpoint) with priority failover, and fill the composer draft — the model you selected still executes the request.",
   "license": "MIT",
   "keywords": [

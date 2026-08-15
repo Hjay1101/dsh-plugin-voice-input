@@ -17,7 +17,11 @@ DeepSeek Harness 语音输入插件：在 Web 界面的聊天输入框加一个�
 ## 特性
 
 - 🎙️ 输入框工具栏（发送按钮左侧）的麦克风按钮，点击录音 / 再点结束转写。
-- ✍️ 识别文字**填入输入框草稿**（已有内容时换行追加），可修改后再发送。
+- ⏱️ **实时字幕**：录音中每 2.5 秒（可配置 `liveIntervalMs`）增量转写并实时写入
+  输入框草稿；停止时用整段音频做一次准确转写替换为定稿。
+- ✨ **文案整理**：定稿自动整理（去语气词、口吃叠字、重复口头禅，补结尾标点），
+  更便于大模型理解；可选接入 LLM 深度润色（`polishMode: llm`）。
+- ✍️ 识别文字填入输入框草稿（保留你录音前已写的内容），可修改后再发送。
 - 🔀 多 provider + 优先级故障转移，配置化支持任意 OpenAI 兼容的 `input_audio`
   ASR 端点（零代码接入，见下文「通用适配器」）。
 - 🔑 API Key 只在 DSH 服务器进程内使用（插件配置或环境变量 / DSH 凭据 seam），
@@ -61,6 +65,9 @@ pnpm add github:Hjay1101/dsh-plugin-voice-input
       name: 'dsh-plugin-voice-input'
       config:
         timeoutMs: 30000          # 单次 provider 请求超时（毫秒）
+        liveIntervalMs: 2500      # 录音中实时字幕的增量转写间隔（毫秒）；0 = 关闭实时
+        polishMode: local         # 文案整理：off（不整理）| local（本地规则，默认）| llm（LLM 润色）
+        polishLlm: {}             # 可选 LLM 整理配置（polishMode=llm 时必填），见下
         defaultProvider: ''       # 空 = 按 priority 排序；可固定 'aliyun-bailian'
         providers:
           - id: aliyun-bailian
@@ -90,6 +97,25 @@ pnpm add github:Hjay1101/dsh-plugin-voice-input
    `MIMO_API_KEY`，也可写入 `~/.dsh/.credentials.yaml`）；
 3. 都不填时派生自 provider id：`ALIYUN_BAILIAN_API_KEY` / `XIAOMI_MIMO_API_KEY`。
 
+### 可选：LLM 深度整理（polishMode: llm）
+
+本地规则整理免费离线、处理语气词和叠字；如需更高质量的润色（补全标点、理顺
+语序、结构化），可接入任意 OpenAI 兼容 LLM（如 DeepSeek API）：
+
+```yaml
+config:
+  polishMode: llm
+  polishLlm:
+    baseUrl: https://api.deepseek.com/v1/chat/completions   # 任意 OpenAI 兼容端点
+    model: deepseek-chat
+    apiKey: ''                    # 直接填 Key，或走 apiKeyEnv
+    apiKeyEnv: POLISH_LLM_API_KEY # 环境变量 / 凭据 seam 名（缺省派生 POLISH_LLM_API_KEY）
+    systemPrompt: ''              # 留空用内置整理提示词
+```
+
+每次录音结束会调用一次整理模型（文本很小，成本极低）；调用失败自动回退原文。
+
+
 ### 通用适配器：接入任意 OpenAI 兼容 ASR
 
 `type: openai-compatible` 可零代码接入任何支持
@@ -115,9 +141,12 @@ pnpm add github:Hjay1101/dsh-plugin-voice-input
 ## 使用
 
 1. 点击输入框工具栏的 🎙️ 按钮开始录音（需允许浏览器麦克风权限）。
-2. 再点一次（或点红色方块）结束录音，状态显示「识别中…」。
-3. 识别文字自动填入输入框（已有内容则换行追加），修改确认后按回车发送——
-   由你当前选中的模型执行。
+2. 录音中：每 2.5 秒自动增量转写，**文字实时显示在输入框**（字幕效果）。
+3. 再点一次（或点红色方块）结束录音：整段音频做一次准确转写 → 自动整理文案
+   （去语气词 / 补标点，可选 LLM 润色）→ 填入输入框（保留你录音前已写的内容）。
+4. 修改确认后按回车发送——由你当前选中的模型执行。
+
+> 录音中请专注说话（实时文字会持续追加）；停止后定稿会替换本次语音产生的部分。
 
 ## 已知限制
 

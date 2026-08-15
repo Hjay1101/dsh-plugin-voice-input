@@ -45,6 +45,26 @@ const transcribeResultSchema = z.object({
   error: errorSchema,
 });
 
+const describeResultSchema = z.object({
+  ok: z.boolean(),
+  liveIntervalMs: z.number(),
+  polishMode: z.string(),
+});
+
+const polishRequestSchema = z.object({
+  /** 待整理的口语转写文本。 */
+  text: z.string(),
+  /** 可选：off | local | llm；缺省按服务端配置 polishMode 执行。 */
+  mode: z.string().optional(),
+});
+
+const polishResultSchema = z.object({
+  ok: z.boolean(),
+  text: z.string(),
+  method: z.string(),
+  error: errorSchema,
+});
+
 export const TYPERT = {
   package: "dsh-plugin-voice-input",
   face: "host",
@@ -72,6 +92,43 @@ export const TYPERT = {
         mode: "strict",
         typeSymbol: "dsh-plugin-voice-input#TranscribeResult",
         schema: transcribeResultSchema,
+      },
+    },
+    {
+      id: "dsh-plugin-voice-input#voiceInput/describe",
+      service: "voiceInput",
+      namespace: "voiceInput",
+      method: "describe",
+      invocation: { kind: "direct" },
+      parameters: [],
+      result: {
+        mode: "strict",
+        typeSymbol: "dsh-plugin-voice-input#DescribeResult",
+        schema: describeResultSchema,
+      },
+    },
+    {
+      id: "dsh-plugin-voice-input#voiceInput/polish",
+      service: "voiceInput",
+      namespace: "voiceInput",
+      method: "polish",
+      invocation: { kind: "direct" },
+      parameters: [
+        {
+          name: "request",
+          wire: "request",
+          source: "json",
+          codec: {
+            mode: "strict",
+            typeSymbol: "dsh-plugin-voice-input#PolishRequest",
+            schema: polishRequestSchema,
+          },
+        },
+      ],
+      result: {
+        mode: "strict",
+        typeSymbol: "dsh-plugin-voice-input#PolishResult",
+        schema: polishResultSchema,
       },
     },
   ],

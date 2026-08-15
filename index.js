@@ -53,6 +53,23 @@ export const Config = z.object({
   defaultProvider: z.string().default(""),
   /** 单次 provider 请求超时。 */
   timeoutMs: z.number().default(DEFAULT_TIMEOUT_MS),
+  /** 录音中实时转写的增量间隔（毫秒）；0 = 关闭实时显示。 */
+  liveIntervalMs: z.number().default(2500),
+  /**
+   * 文案整理模式：off（不整理）| local（本地规则）| llm（调用 polishLlm）。
+   * 客户端始终请求 polish，服务端按此配置决定实际做法。
+   */
+  polishMode: z.string().default("local"),
+  /** 可选的 LLM 整理配置（polishMode=llm 时启用；OpenAI 兼容端点）。 */
+  polishLlm: z
+    .object({
+      baseUrl: z.string().default(""),
+      model: z.string().default(""),
+      apiKey: z.string().default(""),
+      apiKeyEnv: z.string().default(""),
+      systemPrompt: z.string().default(""),
+    })
+    .default({}),
   /** provider 列表：默认阿里云百炼优先、小米 MiMo 备用。 */
   providers: z
     .array(ProviderConfig)
@@ -348,6 +365,89 @@ const ADAPTERS = {
   "openai-compatible": transcribeOpenAiCompatible,
 };
 
+// ---------- 文案整理 ----------
+
+/** 默认 LLM 整理提示词（中文）。 */
+const DEFAULT_POLISH_PROMPT =
+  "你是语音转写文本整理助手。把用户提供的口语化转写整理成书面语，要求：" +
+  "1) 补充正确的标点；2) 删除语气词、口头禅和重复；3) 理顺语序，保持原意，不增删事实信息；" +
+  "4) 若内容像任务指令，整理成清晰、直接的要求。只输出整理后的文本，不要任何解释、前缀或引号。";
+
+/**
+ * 本地规则整理（轻量、离线、免费）：
+ *   - 去除语气词/口头禅（嗯、呃、额、就是说、怎么说呢等）
+ *   - 口吃叠字归并（"我我我" → "我"）
+ *   - 连续重复词归并（"然后然后" → "然后"）
+ *   - 中英空格与换行规范
+ *   - 补结尾标点
+ * 刻意保持保守：只做确定安全的修改，把质量提升交给可选的 LLM 整理。
+ */
+function localPolish(text) {
+  let out = String(text || "");
+  // 口吃叠字归并（连续 3 个及以上相同字符 → 保留 1 个）
+  out = out.replace(/(.)\1{2,}/g, "$1");
+  // 语气词/口头禅
+  out = out
+    .replace(/[呃额嗯]{1,3}/g, "")
+    .replace(/就是说/g, "")
+    .replace(/怎么说呢/g, "")
+    .replace(/你知道吧/g, "")
+    .replace(/你懂的/g, "")
+    .replace(/(那个){2,}/g, "")
+    .replace(/(然后){2,}/g, "$1")
+    .replace(/(就是){2,}/g, "$1")
+    .replace(/^(那个|然后)/, "")
+    .replace(/em{2,}/gi, "嗯");
+  // 标点后的孤立语气词残留（"嗯，" 已被上一条删除，这里清理空段）
+  out = out.replace(/[，、；：]\s*[，、；：]/g, "，").replace(/^[，。；、]+/, "");
+  // 空格/换行规范
+  out = out.replace(/[ \t]{2,}/g, " ").replace(/[ ]*\n[ ]*/g, "\n").replace(/\n{2,}/g, "\n").trim();
+  // 中文字符之间不应有空格
+  out = out.replace(/([\u4e00-\u9fff])\s+([\u4e00-\u9fff])/g, "$1$2");
+  // 补结尾标点（整段以句末标点收尾更利于大模型理解）
+  if (out.length > 0 && !/[。！？!?…；;]$/.test(out)) {
+    out += /[a-zA-Z0-9]$/.test(out) ? "." : "。";
+  }
+  return out;
+}
+
+/** 可选的 LLM 整理（OpenAI 兼容 chat/completions）。 */
+async function polishWithLlm(config, text, apiKey, timeoutMs) {
+  const baseUrl = config.baseUrl || "https://api.deepseek.com/v1/chat/completions";
+  const model = config.model || "deepseek-chat";
+  const systemPrompt = config.systemPrompt || DEFAULT_POLISH_PROMPT;
+  const body = await fetchJson(
+    baseUrl,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: text },
+        ],
+        temperature: 0.2,
+      }),
+    },
+    timeoutMs,
+  );
+  const content =
+    body &&
+    body.choices &&
+    Array.isArray(body.choices) &&
+    body.choices[0] &&
+    body.choices[0].message &&
+    typeof body.choices[0].message.content === "string"
+      ? body.choices[0].message.content.trim()
+      : "";
+  if (!content) throw new TranscribeError("empty-transcript", "polish LLM returned no text");
+  return content;
+}
+
 // ---------- 服务 ----------
 
 export class VoiceInputGateway extends TypertRemoteService {
@@ -428,6 +528,59 @@ export class VoiceInputGateway extends TypertRemoteService {
         details: failures,
       },
     };
+  }
+
+  /**
+   * 向客户端暴露插件运行参数（实时增量间隔、整理模式等），
+   * 客户端据此调度录音中的增量转写。
+   * @returns { ok, liveIntervalMs, polishMode }
+   */
+  async describe() {
+    const config = this.config;
+    return {
+      ok: true,
+      liveIntervalMs: typeof config.liveIntervalMs === "number" ? config.liveIntervalMs : 2500,
+      polishMode: config.polishMode || "local",
+    };
+  }
+
+  /**
+   * 文案整理：把一段口语转写整理为便于大模型理解的书面语。
+   * @param request - { text, mode? }；mode 缺省时按配置（polishMode）执行。
+   * @returns { ok, text, method, error }；method ∈ none|local|llm
+   */
+  async polish(request) {
+    const text = request && typeof request.text === "string" ? request.text : "";
+    const config = this.config;
+    const mode = (request && request.mode) || config.polishMode || "local";
+    const error = (code, message) => ({ ok: false, text, method: "none", error: { code, message, details: [] } });
+
+    if (!text.trim()) return error("empty-text", "nothing to polish");
+    if (mode === "off") return { ok: true, text, method: "none", error: null };
+
+    if (mode === "local") {
+      return { ok: true, text: localPolish(text), method: "local", error: null };
+    }
+
+    if (mode === "llm") {
+      const llm = config.polishLlm || {};
+      try {
+        const apiKey = await resolveApiKey(this.ctx, {
+          apiKey: llm.apiKey || "",
+          apiKeyEnv: llm.apiKeyEnv || "POLISH_LLM_API_KEY",
+        });
+        if (!apiKey) return error("no-api-key", "polish LLM has no API key configured");
+        const polished = await polishWithLlm(llm, text, apiKey, config.timeoutMs || DEFAULT_TIMEOUT_MS);
+        return { ok: true, text: polished, method: "llm", error: null };
+      } catch (err) {
+        return error(
+          err && err.code ? err.code : "polish-llm-failed",
+          String((err && err.message) || err),
+        );
+      }
+    }
+
+    return error("unknown-mode", `unknown polish mode: ${mode}`);
   }
 }
 

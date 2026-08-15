@@ -98,6 +98,43 @@ window.__ModuleLoader__.load({
             schema: { parse(value) { return value; } },
           },
         },
+        {
+          id: "dsh-plugin-voice-input#voiceInput/describe",
+          service: "voiceInput",
+          namespace: "voiceInput",
+          method: "describe",
+          invocation: { kind: "direct" },
+          parameters: [],
+          result: {
+            mode: "strict",
+            typeSymbol: "dsh-plugin-voice-input#DescribeResult",
+            schema: { parse(value) { return value; } },
+          },
+        },
+        {
+          id: "dsh-plugin-voice-input#voiceInput/polish",
+          service: "voiceInput",
+          namespace: "voiceInput",
+          method: "polish",
+          invocation: { kind: "direct" },
+          parameters: [
+            {
+              name: "request",
+              wire: "request",
+              source: "json",
+              codec: {
+                mode: "strict",
+                typeSymbol: "dsh-plugin-voice-input#PolishRequest",
+                schema: { parse(value) { return value; } },
+              },
+            },
+          ],
+          result: {
+            mode: "strict",
+            typeSymbol: "dsh-plugin-voice-input#PolishResult",
+            schema: { parse(value) { return value; } },
+          },
+        },
       ],
     };
 
@@ -301,8 +338,13 @@ window.__ModuleLoader__.load({
     }
 
     // ---------- 麦克风按钮 ----------
+    /** 增量分片最短时长（秒）：不足则等下一片。 */
+    const MIN_SLICE_SECONDS = 0.4;
+    /** describe 失败时的默认增量间隔（毫秒）。 */
+    const DEFAULT_LIVE_INTERVAL = 2500;
+
     function VoiceMicButton(props) {
-      const { transcribe, t, useInput, inputActions } = props;
+      const { transcribe, polish, describe, t, useInput, inputActions } = props;
       const draft = useInput((s) => (s ? s.draft : ""));
       const draftRef = React.useRef(draft);
       React.useEffect(() => { draftRef.current = draft; }, [draft]);
@@ -313,11 +355,65 @@ window.__ModuleLoader__.load({
       const [note, setNote] = React.useState(null); // { kind, text }
       const noteTimer = React.useRef(null);
 
+      // 录音中的增量转写间隔（来自服务端 describe，可配置）。
+      const [liveInterval, setLiveInterval] = React.useState(DEFAULT_LIVE_INTERVAL);
+      const liveIntervalRef = React.useRef(DEFAULT_LIVE_INTERVAL);
+      React.useEffect(() => { liveIntervalRef.current = liveInterval; }, [liveInterval]);
+
+      // 挂载后拉取服务端运行参数（失败则用默认间隔）。
+      React.useEffect(() => {
+        let alive = true;
+        (async () => {
+          try {
+            const env = await describe();
+            const v = env && env.ok === true ? env.value : null;
+            if (alive && v && typeof v.liveIntervalMs === "number" && v.liveIntervalMs > 0) {
+              setLiveInterval(v.liveIntervalMs);
+            }
+          } catch { /* 使用默认间隔 */ }
+        })();
+        return () => { alive = false; };
+      }, [describe]);
+
       const showNote = React.useCallback((kind, text) => {
         setNote({ kind, text });
         clearTimeout(noteTimer.current);
         noteTimer.current = setTimeout(() => setNote(null), 8000);
       }, []);
+
+      /** 把"基稿 + 实时累积"写回输入框草稿。 */
+      const writeDraft = React.useCallback((rec, accumulated) => {
+        const base = rec.baseDraft || "";
+        inputActions.setDraft(base ? `${base}\n${accumulated}` : accumulated);
+      }, [inputActions]);
+
+      /** 增量转写：把自上次以来新录的音频片段转写并追加显示。 */
+      const runChunk = React.useCallback(async (rec) => {
+        if (!rec || rec.stopped || rec.chunkBusy) return;
+        const all = concatFloat32(rec.chunks);
+        if (all.length - rec.lastSlice < Math.floor(MIN_SLICE_SECONDS * rec.rate)) return;
+        const slice = all.slice(rec.lastSlice);
+        rec.lastSlice = all.length;
+        rec.chunkBusy = true;
+        try {
+          const dataUrl = await blobToDataUrl(encodeWav(resample16k(slice, rec.rate), 16000));
+          const env = await transcribe({
+            audio: dataUrl,
+            mime: "audio/wav",
+            format: "wav",
+            language: "zh",
+          });
+          const txt = env && env.ok === true && env.value && env.value.ok === true && env.value.text
+            ? env.value.text
+            : "";
+          if (txt && !rec.stopped) {
+            rec.accumulated += txt;
+            writeDraft(rec, rec.accumulated);
+          }
+        } catch { /* 增量失败静默，不影响录音 */ } finally {
+          rec.chunkBusy = false;
+        }
+      }, [transcribe, writeDraft]);
 
       // 组件卸载时兜底停止录音。
       React.useEffect(() => () => {
@@ -325,6 +421,7 @@ window.__ModuleLoader__.load({
         const rec = recRef.current;
         if (!rec) return;
         clearInterval(rec.timer);
+        clearInterval(rec.chunkTimer);
         try { rec.source.disconnect(); rec.gain.disconnect(); rec.processor.disconnect(); } catch { /* noop */ }
         rec.stream.getTracks().forEach((tr) => tr.stop());
         try { rec.audioCtx.close(); } catch { /* noop */ }
@@ -356,23 +453,40 @@ window.__ModuleLoader__.load({
           processor.connect(gain);
           gain.connect(audioCtx.destination);
           const startedAt = Date.now();
-          recRef.current = { stream, audioCtx, source, processor, gain, chunks, startedAt, timer: null };
+          const rate = audioCtx.sampleRate || 48000;
+          recRef.current = {
+            stream, audioCtx, source, processor, gain, chunks,
+            startedAt, timer: null, chunkTimer: null,
+            baseDraft: draftRef.current || "",
+            accumulated: "",
+            lastSlice: 0,
+            chunkBusy: false,
+            stopped: false,
+            rate,
+          };
           setPhase("recording");
           setElapsed(0);
-          recRef.current.timer = setInterval(() => {
+          const rec = recRef.current;
+          rec.timer = setInterval(() => {
             setElapsed(Math.floor((Date.now() - startedAt) / 1000));
           }, 500);
+          // 增量转写定时器：间隔由服务端配置（describe），默认 2.5s。
+          rec.chunkTimer = setInterval(() => {
+            runChunk(recRef.current);
+          }, Math.max(500, liveIntervalRef.current));
         } catch {
           stream.getTracks().forEach((tr) => tr.stop());
           showNote("error", t("recordFailed"));
         }
-      }, [phase, showNote, t]);
+      }, [phase, showNote, t, runChunk]);
 
       const stop = React.useCallback(async () => {
         const rec = recRef.current;
         if (!rec || phase !== "recording") return;
+        rec.stopped = true;
         recRef.current = null;
         clearInterval(rec.timer);
+        clearInterval(rec.chunkTimer);
         try { rec.source.disconnect(); rec.gain.disconnect(); rec.processor.disconnect(); } catch { /* noop */ }
         rec.stream.getTracks().forEach((tr) => tr.stop());
         try { await rec.audioCtx.close(); } catch { /* noop */ }
@@ -385,8 +499,7 @@ window.__ModuleLoader__.load({
             setPhase("idle");
             return;
           }
-          const rate = rec.audioCtx.sampleRate || 48000;
-          const resampled = resample16k(samples, rate);
+          const resampled = resample16k(samples, rec.rate);
           const wav = encodeWav(resampled, 16000);
           const dataUrl = await blobToDataUrl(wav);
           // api.<method>() 返回 RPC 信封 {ok, value, error}（narrow form），
@@ -397,28 +510,48 @@ window.__ModuleLoader__.load({
             format: "wav",
             language: "zh",
           });
+
+          let finalText = "";
+          let providerInfo = null;
+          let failure = null;
           if (envelope && envelope.ok === true && envelope.value) {
             const result = envelope.value;
             if (result.ok === true && result.text) {
-              const label = providerLabel(result.provider, t);
-              const prev = (draftRef.current || "").trimEnd();
-              const next = prev ? `${prev}\n${result.text}` : result.text;
-              inputActions.setDraft(next);
-              showNote("info", label ? t("done").replace("{provider}", label) : t("doneNoProvider"));
+              finalText = result.text;
+              providerInfo = result.provider;
             } else {
-              showNote("error", friendlyError(result.error, t));
+              failure = friendlyError(result.error, t);
             }
           } else if (envelope && envelope.ok === false) {
-            showNote("error", friendlyError(envelope.error, t));
+            failure = friendlyError(envelope.error, t);
           } else {
-            showNote("error", t("unexpected"));
+            failure = t("unexpected");
+          }
+
+          if (finalText) {
+            // 文案整理（服务端按配置执行 local/llm/off；失败则回退原文）。
+            try {
+              const penv = await polish({ text: finalText, mode: "auto" });
+              if (penv && penv.ok === true && penv.value && penv.value.ok === true && penv.value.text) {
+                finalText = penv.value.text;
+              }
+            } catch { /* 整理失败用原文 */ }
+            writeDraft(rec, finalText);
+            const label = providerLabel(providerInfo, t);
+            showNote("info", label ? t("done").replace("{provider}", label) : t("doneNoProvider"));
+          } else if (rec.accumulated) {
+            // 定稿为空：保留实时累积的文字，避免把已经显示的内容清掉。
+            writeDraft(rec, rec.accumulated);
+            showNote("error", failure || t("unexpected"));
+          } else {
+            showNote("error", failure || t("unexpected"));
           }
         } catch (err) {
           showNote("error", t("error").replace("{msg}", String((err && err.message) || err)));
         } finally {
           setPhase("idle");
         }
-      }, [phase, showNote, t, transcribe, inputActions]);
+      }, [phase, showNote, t, transcribe, polish, writeDraft]);
 
       const recording = phase === "recording";
       const busy = phase === "busy";
@@ -477,15 +610,19 @@ window.__ModuleLoader__.load({
       ctx.effect(() => ctx.locale.register(NS, { zh, en }), "dsh-plugin-voice-input: dictionaries");
       const t = ctx.locale.bind(NS);
 
-      const transcribe = async (request) => {
+      const remoteApi = async () => {
         await mountReady;
         const api = ctx.get("remote.voiceInput");
         if (!api) throw new Error("voiceInput remote is unavailable");
-        return api.transcribe(request);
+        return api;
       };
 
-      // 把 transcribe 与 t 注入给输入框工具栏里的组件。
-      const injected = () => ({ transcribe, t });
+      const transcribe = async (request) => (await remoteApi()).transcribe(request);
+      const polish = async (request) => (await remoteApi()).polish(request);
+      const describe = async () => (await remoteApi()).describe();
+
+      // 把 transcribe / polish / describe 与 t 注入给输入框工具栏里的组件。
+      const injected = () => ({ transcribe, polish, describe, t });
 
       ctx.slots.inject("conversation.input.right", () => ctx.slots.register({
         name: "conversation.input.right",

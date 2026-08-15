@@ -20,8 +20,14 @@ fail, per-provider error details are returned.
 
 - 🎙️ Mic button in the composer tool row (left of the send button); click to
   record, click again to stop and transcribe.
-- ✍️ The transcribed text is **filled into the composer draft** (appended on a
-  new line when a draft already exists), so you can review before sending.
+- ⏱️ **Live captions**: while recording, incremental transcription runs every
+  2.5 s (configurable `liveIntervalMs`) and streams into the composer draft;
+  on stop, the full audio is transcribed once and replaces it as the final text.
+- ✨ **Text polish**: the final transcript is cleaned up automatically (fillers,
+  stutters, repeated phrases removed, terminal punctuation added); optional LLM
+  polish (`polishMode: llm`) produces a fully rewritten, structured request.
+- ✍️ The text is filled into the composer draft (your pre-existing draft is
+  preserved), so you can review before sending.
 - 🔀 Multiple providers with priority failover; any OpenAI-compatible
   `input_audio` ASR endpoint can be added **without code** (see below).
 - 🔑 API keys live only in the DSH server process (plugin config or
@@ -63,6 +69,9 @@ Plugin config is delivered via the profile's `cordis.patch.yml` `config` field
       name: 'dsh-plugin-voice-input'
       config:
         timeoutMs: 30000
+        liveIntervalMs: 2500      # live-caption incremental interval (ms); 0 disables
+        polishMode: local         # off | local (default) | llm
+        polishLlm: {}             # optional LLM polish config (required when polishMode=llm)
         defaultProvider: ''
         providers:
           - id: aliyun-bailian
@@ -94,6 +103,25 @@ Plugin config is delivered via the profile's `cordis.patch.yml` `config` field
 3. otherwise derived from the provider id: `ALIYUN_BAILIAN_API_KEY` /
    `XIAOMI_MIMO_API_KEY`.
 
+### Optional: LLM deep polish (`polishMode: llm`)
+
+The local rules are free and offline; for higher quality (full punctuation,
+reordering, structuring) plug in any OpenAI-compatible LLM (e.g. DeepSeek API):
+
+```yaml
+config:
+  polishMode: llm
+  polishLlm:
+    baseUrl: https://api.deepseek.com/v1/chat/completions   # any OpenAI-compatible endpoint
+    model: deepseek-chat
+    apiKey: ''                    # inline key, or use apiKeyEnv
+    apiKeyEnv: POLISH_LLM_API_KEY # env / credentials-seam name (default POLISH_LLM_API_KEY)
+    systemPrompt: ''              # empty = built-in polishing prompt
+```
+
+One small LLM call per recording (tiny text, negligible cost); falls back to
+the raw transcript if the call fails.
+
 ### Generic adapter: any OpenAI-compatible ASR
 
 `type: openai-compatible` wires any chat/completions endpoint that accepts an
@@ -120,10 +148,15 @@ the `ADAPTERS` map in `index.js`. PRs for more providers are welcome.
 
 1. Click the 🎙️ button in the composer tool row to start recording (allow the
    browser microphone permission).
-2. Click again (or the red square) to stop; the status shows "Transcribing…".
-3. The text is filled into the composer draft (appended on a new line when a
-   draft exists); review, edit, and press Enter — your currently selected
-   model executes it.
+2. While recording, incremental transcription runs every 2.5 s and **streams
+   into the composer draft** (live captions).
+3. Click again (or the red square) to stop: the full audio is transcribed once,
+   then polished (fillers removed / punctuation added, optional LLM rewrite),
+   and fills the draft (your pre-existing draft is preserved).
+4. Review, edit, and press Enter — your currently selected model executes it.
+
+> Focus on speaking while recording (live text keeps appending); on stop, the
+> final text replaces the part produced by this recording.
 
 ## Known limitations
 
