@@ -277,11 +277,13 @@ window.__ModuleLoader__.load({
           ".dsh-voice-mic-btn:hover{background:var(--dsw-alias-bg-layer-2)}" +
           ".dsh-voice-mic-btn:focus-visible{outline:2px solid var(--dsw-alias-label-tertiary);outline-offset:-2px}" +
           ".dsh-voice-mic-btn:disabled{opacity:.55;cursor:default}" +
-          // 输入框尾部重排：默认渲染顺序是 [麦克风][模型][计量][发送]，
-          // 用户希望 [模型][麦克风][计量][发送]——用 flex order 把
-          // 模型槽排在最前（-2），麦克风紧随其后（-1），其余保持 0。
+          // 输入框尾部重排：默认渲染顺序是 [麦克风][模型][计量][发送]。
+          // 目标：[模型][计量][上下文…][麦克风][发送]——
+          //   模型槽排最前（-2），麦克风排到 order 1（在 0 序元素之后），
+          //   发送按钮（trailing 最后一个子元素）order 2 确保在麦克风之后。
           "[data-slot=\"conversation.input.model\"]>*{order:-2}" +
-          ".dsh-voice-mic-wrap{order:-1}";
+          "[data-slot=\"conversation.input.right\"]>.dsh-voice-mic-wrap{order:1}" +
+          "div:has(> [data-slot=\"conversation.input.right\"])>:last-child{order:2}";
         document.head.appendChild(tag);
       }
     }
