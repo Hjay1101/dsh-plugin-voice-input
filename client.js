@@ -276,7 +276,12 @@ window.__ModuleLoader__.load({
           ".dsh-voice-mic-btn{box-sizing:border-box;color:var(--dsw-alias-label-primary);background:transparent;border:none;border-radius:8px}" +
           ".dsh-voice-mic-btn:hover{background:var(--dsw-alias-bg-layer-2)}" +
           ".dsh-voice-mic-btn:focus-visible{outline:2px solid var(--dsw-alias-label-tertiary);outline-offset:-2px}" +
-          ".dsh-voice-mic-btn:disabled{opacity:.55;cursor:default}";
+          ".dsh-voice-mic-btn:disabled{opacity:.55;cursor:default}" +
+          // 输入框尾部重排：默认渲染顺序是 [麦克风][模型][计量][发送]，
+          // 用户希望 [模型][麦克风][计量][发送]——用 flex order 把
+          // 模型槽排在最前（-2），麦克风紧随其后（-1），其余保持 0。
+          "[data-slot=\"conversation.input.model\"]>*{order:-2}" +
+          ".dsh-voice-mic-wrap{order:-1}";
         document.head.appendChild(tag);
       }
     }
@@ -587,7 +592,7 @@ window.__ModuleLoader__.load({
 
       return React.createElement(
         "div",
-        { style: styles.wrap },
+        { className: "dsh-voice-mic-wrap", style: styles.wrap },
         React.createElement(
           "button",
           {
