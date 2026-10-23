@@ -84,14 +84,14 @@ export const TYPERT = {
           codec: {
             mode: "strict",
             typeSymbol: "dsh-plugin-voice-input#TranscribeRequest",
-            schema: transcribeRequestSchema,
+            create: () => transcribeRequestSchema,
           },
         },
       ],
       result: {
         mode: "strict",
         typeSymbol: "dsh-plugin-voice-input#TranscribeResult",
-        schema: transcribeResultSchema,
+        create: () => transcribeResultSchema,
       },
     },
     {
@@ -104,7 +104,7 @@ export const TYPERT = {
       result: {
         mode: "strict",
         typeSymbol: "dsh-plugin-voice-input#DescribeResult",
-        schema: describeResultSchema,
+        create: () => describeResultSchema,
       },
     },
     {
@@ -121,14 +121,14 @@ export const TYPERT = {
           codec: {
             mode: "strict",
             typeSymbol: "dsh-plugin-voice-input#PolishRequest",
-            schema: polishRequestSchema,
+            create: () => polishRequestSchema,
           },
         },
       ],
       result: {
         mode: "strict",
         typeSymbol: "dsh-plugin-voice-input#PolishResult",
-        schema: polishResultSchema,
+        create: () => polishResultSchema,
       },
     },
   ],
